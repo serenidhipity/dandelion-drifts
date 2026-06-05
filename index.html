@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dandelion Drift</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #f0f4f8;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #4a5568;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            touch-action: none;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            background: #fff;
+        }
+
+        canvas {
+            display: block;
+            background: linear-gradient(to bottom, #93c5fd 0%, #e0f2fe 100%);
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #score-display {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 1.2rem;
+            font-weight: 300;
+        }
+
+        .overlay {
+            background: rgba(255, 255, 255, 0.8);
+            padding: 2rem;
+            border-radius: 1rem;
+            text-align: center;
+            pointer-events: auto;
+            transition: opacity 0.5s ease;
+        }
+
+        .overlay h1 {
+            font-weight: 300;
+            margin-bottom: 1.5rem;
+            color: #2d3748;
+        }
+
+        #instructions {
+            text-align: left;
+            margin-bottom: 2rem;
+            max-width: 300px;
+        }
+
+        .instruction-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.8rem;
+        }
+
+        .instruction-item p {
+            margin: 0;
+            font-size: 0.9rem;
+            line-height: 1.2;
+        }
+
+        .icon {
+            width: 20px;
+            height: 20px;
+            margin-right: 15px;
+            flex-shrink: 0;
+            border-radius: 50%;
+        }
+
+        .seed-icon { background: rgba(255, 255, 255, 0.8); border: 1px solid #cbd5e0; }
+        .rain-icon { background: #63b3ed; }
+        .bird-icon { background: #718096; border-radius: 2px; transform: rotate(45deg); }
+        .sun-icon { background: #f6e05e; box-shadow: 0 0 5px #f6e05e; }
+
+        .hidden {
+            display: none;
+        }
+
+        button {
+            background: #4a5568;
+            color: white;
+            border: none;
+            padding: 0.8rem 2rem;
+            font-size: 1rem;
+            border-radius: 2rem;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        button:hover {
+            background: #2d3748;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div id="ui-layer">
+            <div id="score-display" class="hidden">Distance: 0m</div>
+            <div id="start-screen" class="overlay">
+                <h1>Dandelion Drift</h1>
+                <div id="instructions">
+                    <div class="instruction-item">
+                        <span class="icon seed-icon"></span>
+                        <p><strong>You:</strong> Tap, Space, or ↑ to puff air.</p>
+                    </div>
+                    <div class="instruction-item">
+                        <span class="icon rain-icon"></span>
+                        <p><strong>Avoid:</strong> Don't fall into the water below.</p>
+                    </div>
+                    <div class="instruction-item">
+                        <span class="icon bird-icon"></span>
+                        <p><strong>Avoid:</strong> Birds will end your journey.</p>
+                    </div>
+                    <div class="instruction-item">
+                        <span class="icon sun-icon"></span>
+                        <p><strong>Collect:</strong> Rare Sunlight grants <strong>Immunity</strong> and <strong>Lightness</strong>.</p>
+                    </div>
+                </div>
+                <button id="start-button">Start Journey</button>
+            </div>
+            <div id="game-over-screen" class="overlay hidden">
+                <h1>The Journey Ends</h1>
+                <p id="final-score"></p>
+                <button id="restart-button">Try Again</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Entities ---
+
+        class Particle {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.size = Math.random() * 4 + 2;
+                this.speedX = (Math.random() - 0.5) * 4;
+                this.speedY = Math.random() * 2 + 1;
+                this.alpha = 1;
+                this.decay = Math.random() * 0.02 + 0.01;
+            }
+
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.alpha -= this.decay;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, this.alpha);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class Seed {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.radius = 8;
+                this.velocity = 0;
+                this.baseGravity = 0.4;
+                this.gravity = 0.4;
+                this.lift = -8;
+                this.drag = 0.98;
+                this.particles = [];
+                this.boostTimer = 0;
+            }
+
+            update(deltaTime) {
+                // Grace period: No gravity for the first 5 meters
+                const score = window.getCurrentScore ? window.getCurrentScore() : 0;
+                const isGracePeriod = score < 5;
+
+                // Handle boost
+                if (this.boostTimer > 0) {
+                    this.boostTimer -= deltaTime;
+                    this.gravity = this.baseGravity * 0.4;
+                } else if (isGracePeriod) {
+                    this.gravity = 0;
+                    this.velocity = 0; // Keep it perfectly still vertically
+                } else {
+                    this.gravity = this.baseGravity;
+                }
+
+                this.velocity += this.gravity;
+                this.velocity *= this.drag;
+                this.y += this.velocity;
+
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    this.particles[i].update();
+                    if (this.particles[i].alpha <= 0) this.particles.splice(i, 1);
+                }
+            }
+
+            draw(ctx) {
+                this.particles.forEach(p => p.draw(ctx));
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                // Glow effect during boost (Immunity Aura)
+                if (this.boostTimer > 0) {
+                    ctx.shadowBlur = 20;
+                    ctx.shadowColor = '#f6e05e';
+                    
+                    // Draw a subtle outer shield circle
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.radius + 10, 0, Math.PI * 2);
+                    ctx.strokeStyle = 'rgba(246, 224, 94, 0.3)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.boostTimer > 0 ? 'rgba(255, 250, 200, 0.9)' : 'rgba(255, 255, 255, 0.6)';
+                ctx.shadowBlur = 5;
+                ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                
+                ctx.strokeStyle = this.boostTimer > 0 ? 'rgba(246, 224, 94, 0.5)' : 'rgba(255, 255, 255, 0.3)';
+                ctx.lineWidth = 0.8;
+                for (let i = 0; i < 64; i++) {
+                    const angle = (i / 64) * Math.PI * 2;
+                    const length = 12 + Math.random() * 8;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(Math.cos(angle) * length, Math.sin(angle) * length);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+
+            puff() {
+                this.velocity = this.lift;
+                const particleCount = this.boostTimer > 0 ? 20 : 12;
+                for (let i = 0; i < particleCount; i++) {
+                    this.particles.push(new Particle(this.x, this.y + 10));
+                }
+            }
+        }
+
+        class Bird {
+            constructor(canvasWidth, canvasHeight) {
+                this.radius = 8;
+                this.x = canvasWidth + 50;
+                this.y = Math.random() * (canvasHeight * 0.6); // Higher above water
+                this.speed = 2 + Math.random() * 3;
+                this.wingAngle = 0;
+            }
+            update() { 
+                this.x -= this.speed; 
+                this.wingAngle += 0.2;
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.strokeStyle = '#4a5568';
+                ctx.lineWidth = 2;
+                ctx.lineCap = 'round';
+                
+                const flap = Math.sin(this.wingAngle) * 5;
+                ctx.beginPath();
+                ctx.moveTo(-10, flap);
+                ctx.quadraticCurveTo(0, -5, 10, flap);
+                ctx.stroke();
+                
+                ctx.fillStyle = '#4a5568';
+                ctx.beginPath();
+                ctx.arc(0, 0, 2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.restore();
+            }
+            isOffscreen() { return this.x < -50; }
+        }
+
+        class Sunlight {
+            constructor(canvasWidth, canvasHeight) {
+                this.radius = 10;
+                this.x = canvasWidth + 20;
+                this.y = Math.random() * (canvasHeight * 0.5) + 50; // Well above water
+                this.speed = 1.5;
+                this.collected = false;
+                this.pulse = 0;
+            }
+            update() {
+                this.x -= this.speed;
+                this.pulse += 0.1;
+            }
+            draw(ctx) {
+                const glow = 2 + Math.sin(this.pulse) * 2;
+                ctx.fillStyle = '#f6e05e';
+                ctx.shadowBlur = 10 + glow;
+                ctx.shadowColor = '#f6e05e';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+            isOffscreen() { return this.x < -50; }
+        }
+
+        // --- Game Logic ---
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('score-display');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const finalScore = document.getElementById('final-score');
+        const startButton = document.getElementById('start-button');
+        const restartButton = document.getElementById('restart-button');
+
+        let gameActive = false;
+        let score = 0;
+        let seed;
+        let obstacles = [];
+        let collectibles = [];
+        let spawnTimer = 0;
+        let collectTimer = 0;
+        let hills = [];
+        let lastTime = 0;
+        let animationId;
+
+        function generateHillPoints(variance) {
+            const points = [];
+            for (let i = 0; i <= 1200; i += 50) {
+                points.push({ x: i, y: 400 + Math.random() * 100 * variance });
+            }
+            return points;
+        }
+
+        function init() {
+            canvas.width = Math.min(window.innerWidth, 800);
+            canvas.height = Math.min(window.innerHeight, 600);
+            seed = new Seed(canvas.width / 4, canvas.height / 2);
+            obstacles = [];
+            collectibles = [];
+            hills = [
+                { x: 0, speed: 0.2, color: '#e2e8f0', points: generateHillPoints(0.2) },
+                { x: 0, speed: 0.5, color: '#cbd5e0', points: generateHillPoints(0.5) }
+            ];
+            score = 0;
+            spawnTimer = 0;
+            collectTimer = 0;
+        }
+
+        function startGame() {
+            gameActive = true;
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            scoreDisplay.classList.remove('hidden');
+            init();
+            lastTime = performance.now();
+            gameLoop(lastTime);
+        }
+
+        function gameOver() {
+            gameActive = false;
+            cancelAnimationFrame(animationId);
+            scoreDisplay.classList.add('hidden');
+            finalScore.textContent = `You traveled ${Math.floor(score)} meters.`;
+            gameOverScreen.classList.remove('hidden');
+        }
+
+        window.getCurrentScore = () => score;
+
+        function update(deltaTime) {
+            if (!gameActive) return;
+
+            seed.update(deltaTime);
+
+            // Spawn obstacles (Only Birds now, delayed until after grace period)
+            spawnTimer += deltaTime;
+            const currentInterval = Math.max(800, 2000 - (score * 2));
+            if (spawnTimer > currentInterval && score > 5) {
+                obstacles.push(new Bird(canvas.width, canvas.height));
+                spawnTimer = 0;
+            }
+
+            // Spawn collectibles (Rarer Sunlight)
+            collectTimer += deltaTime;
+            if (collectTimer > 12000) {
+                collectibles.push(new Sunlight(canvas.width, canvas.height));
+                collectTimer = 0;
+            }
+
+            // Update obstacles
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                obstacles[i].update();
+                const dx = obstacles[i].x - seed.x;
+                const dy = obstacles[i].y - seed.y;
+                if (Math.sqrt(dx * dx + dy * dy) < obstacles[i].radius + seed.radius) {
+                    if (seed.boostTimer <= 0) gameOver();
+                }
+                if (obstacles[i].isOffscreen()) obstacles.splice(i, 1);
+            }
+
+            // Update collectibles
+            for (let i = collectibles.length - 1; i >= 0; i--) {
+                const c = collectibles[i];
+                c.update();
+                const dx = c.x - seed.x;
+                const dy = c.y - seed.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < c.radius + seed.radius) {
+                    score += 100;
+                    seed.boostTimer = 5000;
+                    collectibles.splice(i, 1);
+                    continue;
+                }
+                
+                if (c.isOffscreen()) {
+                    collectibles.splice(i, 1);
+                }
+            }
+
+            score += deltaTime * 0.01;
+            scoreDisplay.textContent = `Distance: ${Math.floor(score)}m`;
+
+            // Game over if too high or touches water (bottom 1/4)
+            const waterLevel = canvas.height * 0.75;
+            if (seed.y < -100 || seed.y > waterLevel - seed.radius) {
+                if (seed.boostTimer <= 0) gameOver();
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Hills
+            hills.forEach(hill => {
+                hill.x -= hill.speed;
+                if (hill.x < -200) hill.x = 0;
+                ctx.fillStyle = hill.color;
+                ctx.beginPath();
+                ctx.moveTo(hill.x, canvas.height);
+                hill.points.forEach(p => ctx.lineTo(hill.x + p.x, p.y));
+                ctx.lineTo(hill.x + 1200, canvas.height);
+                ctx.fill();
+            });
+
+            // Water (Bottom 1/4)
+            const waterLevel = canvas.height * 0.75;
+            const time = performance.now() * 0.002;
+            ctx.fillStyle = 'rgba(99, 179, 237, 0.6)';
+            ctx.beginPath();
+            ctx.moveTo(0, waterLevel);
+            for (let x = 0; x <= canvas.width; x += 20) {
+                const y = waterLevel + Math.sin(x * 0.02 + time) * 5;
+                ctx.lineTo(x, y);
+            }
+            ctx.lineTo(canvas.width, canvas.height);
+            ctx.lineTo(0, canvas.height);
+            ctx.closePath();
+            ctx.fill();
+            
+            collectibles.forEach(c => c.draw(ctx));
+            seed.draw(ctx);
+            obstacles.forEach(o => o.draw(ctx));
+        }
+
+        function gameLoop(timestamp) {
+            if (!gameActive) return;
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+            update(deltaTime || 0);
+            draw();
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        window.addEventListener('mousedown', () => { if (gameActive) seed.puff(); });
+        window.addEventListener('touchstart', (e) => {
+            if (gameActive) { seed.puff(); e.preventDefault(); }
+        }, { passive: false });
+
+        window.addEventListener('keydown', (e) => {
+            if (!gameActive) return;
+            if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+                seed.puff();
+                e.preventDefault();
+            }
+        });
+
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', startGame);
+
+        window.addEventListener('resize', () => {
+            canvas.width = Math.min(window.innerWidth, 800);
+            canvas.height = Math.min(window.innerHeight, 600);
+        });
+
+        init();
+        draw(); // Initial draw for background
+    </script>
+</body>
+</html>
