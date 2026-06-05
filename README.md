@@ -30,11 +30,3 @@ The game is designed for both desktop and mobile play:
 *   **Animated Entities:** Birds with flapping wings and a gently waving water surface.
 *   **Ultra-Fluffy Seed:** A procedurally drawn dandelion head with 64 delicate filaments.
 
-## How to Play
-
-1.  Download the `index.html` file.
-2.  Open it in any modern web browser.
-3.  Click **Start Journey** and see how far the wind can carry you!
-
----
-*Created with care as a tribute to simple, addictive arcade mechanics.*
