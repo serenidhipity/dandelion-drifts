@@ -1,5 +1,6 @@
 # Dandelion Drift 🌬️🌼
 
+https://serenidhipity.github.io/dandelion-drifts/
 A minimalist, physics-based "Zen" game where you guide a delicate dandelion seed on a journey across a shifting landscape.
 
 ## The Journey
